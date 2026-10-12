@@ -1,0 +1,1453 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Taste the World: 環球美食打字冒險 (角色陪同版)</title>
+  
+  <!-- D3.js & TopoJSON -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://unpkg.com/topojson-client@3"></script>
+
+  <style>
+    :root {
+      --ocean-blue: #72B2D6;
+      --land-brown: #B87322;
+      --navy: #1D2D44;
+      --gold: #F2A93B;
+      --red: #E65F5C;
+      --green: #2A9D8F;
+      --passport-cover: #4A2810;
+      --passport-page: #FAF3E0;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    
+    body {
+      background-color: var(--navy);
+      color: var(--navy);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    header {
+      background: #111B27;
+      color: #fff;
+      padding: 6px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+      z-index: 10;
+      height: 52px;
+    }
+
+    .boarding-pass { display: flex; align-items: center; gap: 10px; }
+    .avatar-container {
+      position: relative; width: 38px; height: 38px; background: #fff;
+      border-radius: 50%; border: 2px solid var(--gold); display: flex;
+      justify-content: center; align-items: center; overflow: hidden;
+    }
+    .avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+    
+    .badge-rank {
+      position: absolute; bottom: -2px; right: -2px; background: var(--red);
+      color: white; font-size: 9px; padding: 1px 4px; border-radius: 8px; font-weight: bold; z-index: 2;
+    }
+    .player-info h3 { font-size: 13px; color: var(--gold); }
+    .player-info p { font-size: 10px; opacity: 0.8; color: #ccc; }
+    .stats-bar { display: flex; gap: 10px; }
+    .stat-item { background: rgba(255,255,255,0.1); padding: 4px 10px; border-radius: 16px; font-size: 11px; color: #fff; }
+
+    .continent-bar {
+      background: #1D2D44;
+      padding: 5px 10px;
+      display: flex;
+      justify-content: center;
+      gap: 6px;
+      z-index: 9;
+      flex-wrap: wrap;
+    }
+
+    .continent-btn {
+      background: rgba(255,255,255,0.1);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.2);
+      padding: 4px 10px;
+      border-radius: 16px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .continent-btn:hover, .continent-btn.active {
+      background: var(--gold);
+      color: var(--navy);
+      font-weight: bold;
+      transform: translateY(-1px);
+    }
+
+    .view-container { position: relative; flex: 1; overflow: hidden; }
+    .view { width: 100%; height: 100%; position: absolute; top:0; left:0; display: none; }
+    .view.active { display: block; }
+
+    .map-wrapper { position: relative; width: 100%; height: 100%; background: var(--ocean-blue); overflow: hidden; }
+    #worldMapSvg { width: 100%; height: 100%; }
+
+    .country-shape { fill: var(--land-brown); stroke: #FFFFFF; stroke-width: 0.5; transition: fill 0.2s; }
+    .country-shape:hover { fill: #C9822B; }
+
+    .flight-line {
+      fill: none;
+      stroke: var(--gold);
+      stroke-width: 2.5;
+      stroke-dasharray: 6 4;
+      opacity: 0.85;
+      animation: dash 20s linear infinite;
+    }
+
+    @keyframes dash { to { stroke-dashoffset: -100; } }
+
+    #pinLayer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
+
+    .node-pin {
+      position: absolute; transform: translate(-50%, -50%); cursor: pointer; pointer-events: auto;
+      display: flex; flex-direction: column; align-items: center; transition: opacity 0.3s;
+    }
+    
+    .pin-icon {
+      width: 38px; height: 38px; border-radius: 50%; background: #fff; border: 3px solid var(--navy);
+      display: flex; justify-content: center; align-items: center; font-size: 16px; box-shadow: 0 4px 10px rgba(0,0,0,0.35);
+      position: relative; overflow: hidden;
+    }
+
+    .flag-img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+
+    .plane-badge {
+      position: absolute; top: -20px; font-size: 18px;
+      animation: floatPlane 1.5s ease-in-out infinite alternate;
+      filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4));
+    }
+
+    @keyframes floatPlane {
+      from { transform: translateY(0px) rotate(15deg); }
+      to { transform: translateY(-5px) rotate(15deg); }
+    }
+
+    .node-pin.unlocked .pin-icon { border-color: var(--green); }
+    .node-pin.perfect-cleared .pin-icon { border-color: var(--gold); box-shadow: 0 0 12px var(--gold); }
+    .node-pin.active-target .pin-icon { border-color: var(--gold); animation: pulse 1.5s infinite; }
+    .node-pin.locked { cursor: not-allowed; opacity: 0.5; filter: grayscale(1); }
+    .node-pin.locked .pin-icon { border-color: #666; }
+    
+    .lock-overlay {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0, 0, 0, 0.4); display: flex; justify-content: center; align-items: center; color: #fff; font-size: 12px;
+    }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 rgba(242, 169, 59, 0.8); }
+      70% { box-shadow: 0 0 0 12px rgba(242, 169, 59, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(242, 169, 59, 0); }
+    }
+
+    .pin-label { background: var(--navy); color: white; font-size: 10px; padding: 2px 6px; border-radius: 8px; margin-top: 3px; white-space: nowrap; font-weight: bold; }
+
+    .pilot-guide-box {
+      position: absolute; bottom: 15px; left: 15px; z-index: 15;
+      display: flex; align-items: flex-end; gap: 10px; pointer-events: none;
+    }
+    .pilot-avatar-wrap {
+      width: 60px; height: 60px; background: #FFF; border: 3px solid var(--gold);
+      border-radius: 50%; box-shadow: 0 4px 12px rgba(0,0,0,0.3); overflow: hidden; flex-shrink: 0;
+      transition: transform 0.2s ease;
+    }
+    .pilot-avatar-wrap.cheer { animation: cheerBounce 0.4s ease infinite alternate; }
+    .pilot-avatar-wrap.panic { animation: panicShake 0.3s ease infinite; }
+
+    @keyframes cheerBounce { from { transform: translateY(0); } to { transform: translateY(-8px) scale(1.05); } }
+    @keyframes panicShake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-5px); } 75% { transform: translateX(5px); } }
+
+    .pilot-dialog {
+      background: #FFF; padding: 8px 12px; border-radius: 12px; border-bottom-left-radius: 2px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2); max-width: 240px; border: 2px solid var(--navy);
+      position: relative; animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+    .pilot-dialog h4 { font-size: 11px; color: var(--gold); margin-bottom: 2px; }
+    .pilot-dialog p { font-size: 12px; color: var(--navy); font-weight: bold; line-height: 1.3; }
+
+    @keyframes popIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
+    .bottom-triggers { position: absolute; bottom: 12px; right: 12px; display: flex; gap: 8px; z-index: 6; }
+    .passport-trigger-btn, .book-trigger-btn {
+      background: var(--passport-cover); color: #F3E5AB; border-radius: 10px; padding: 8px 12px;
+      border: 2px solid #D4AF37; cursor: pointer; font-weight: bold; font-size: 12px; display: flex; align-items: center; gap: 6px;
+    }
+    .book-trigger-btn { background: #2C1A0E; border-color: var(--gold); }
+
+    /* 緊湊型無須捲動的打字戰鬥區 */
+    .game-wrapper {
+      background: var(--passport-page); width: 100%; height: 100%; padding: 8px 15px;
+      display: flex; flex-direction: column; align-items: center; justify-content: space-around;
+      overflow: hidden;
+    }
+    .game-header {
+      width: 100%; max-width: 760px; display: flex; justify-content: space-between; align-items: center;
+      background: #fff; padding: 6px 14px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+    }
+
+    .timer-bar-container {
+      width: 100%; max-width: 760px; height: 8px; background: #e0e0e0; border-radius: 4px;
+      overflow: hidden; display: none; border: 1px solid #ccc;
+    }
+    .timer-bar-fill {
+      height: 100%; width: 100%; background: linear-gradient(90deg, #2A9D8F, #F2A93B, #E65F5C);
+      transition: width 0.1s linear;
+    }
+
+    .target-card {
+      background: #fff; border-radius: 12px; padding: 8px 16px; text-align: center;
+      width: 100%; max-width: 760px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); border: 2px solid #E2E8F0;
+      position: relative;
+    }
+    .food-display { font-size: 34px; transition: transform 0.1s ease; display: inline-block; }
+    .food-display.bounce { transform: scale(1.3) rotate(8deg); }
+
+    .combo-float {
+      position: absolute; right: 20px; top: 10px; font-size: 16px; font-weight: 900;
+      color: var(--red); animation: floatUp 0.6s ease-out forwards; pointer-events: none;
+    }
+    @keyframes floatUp { 0% { opacity: 1; transform: translateY(0); } 100% { opacity: 0; transform: translateY(-25px); } }
+
+    .target-text-box {
+      font-size: 20px; font-family: monospace; letter-spacing: 2px; color: #334155; margin: 6px 0;
+      background: #F8FAFC; border: 2px solid #CBD5E1; padding: 6px; border-radius: 8px; text-align: center;
+      line-height: 1.3; word-break: break-word; min-height: 42px;
+    }
+    .correct-char { color: var(--green); text-decoration: underline; font-weight: bold; }
+    .current-char { background: var(--gold); color: #fff; padding: 0 3px; border-radius: 3px; font-weight: bold; animation: keyBlink 0.8s infinite alternate; }
+    @keyframes keyBlink { from { opacity: 0.7; } to { opacity: 1; } }
+
+    .error-flash { animation: shake 0.2s ease-in-out; border-color: var(--red) !important; }
+
+    .input-box {
+      width: 100%; max-width: 450px; padding: 6px 12px; font-size: 15px; text-align: center;
+      border: 2px solid var(--navy); border-radius: 6px; outline: none; font-family: monospace;
+    }
+
+    /* 緊湊精緻 10 指盲打虛擬鍵盤 */
+    .keyboard-guide-wrap {
+      background: #111B27; border-radius: 10px; padding: 6px 10px; width: 100%; max-width: 720px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3); border: 2px solid var(--gold); display: flex;
+      flex-direction: column; align-items: center; gap: 3px;
+    }
+    .finger-hint-banner {
+      color: #FFF; font-size: 11px; font-weight: bold; background: rgba(242, 169, 59, 0.2);
+      padding: 2px 10px; border-radius: 10px; border: 1px dashed var(--gold);
+    }
+    .kb-row { display: flex; gap: 3px; justify-content: center; width: 100%; }
+    .kb-key {
+      background: #2D3748; color: #E2E8F0; border-radius: 4px; height: 26px; min-width: 25px;
+      display: flex; justify-content: center; align-items: center; font-size: 10px; font-weight: bold;
+      border-bottom: 2px solid #1A202C; transition: all 0.1s ease; position: relative; user-select: none;
+    }
+    .kb-key.bump::after {
+      content: ''; position: absolute; bottom: 2px; width: 5px; height: 2px; background: var(--gold); border-radius: 1px;
+    }
+    .finger-lp { border-top: 2px solid #E65F5C; }
+    .finger-lr { border-top: 2px solid #F2A93B; }
+    .finger-lm { border-top: 2px solid #2A9D8F; }
+    .finger-li { border-top: 2px solid #72B2D6; }
+    .finger-ri { border-top: 2px solid #9B59B6; }
+    .finger-rm { border-top: 2px solid #2A9D8F; }
+    .finger-rr { border-top: 2px solid #F2A93B; }
+    .finger-rp { border-top: 2px solid #E65F5C; }
+    .finger-thumb { border-top: 2px solid #E2E8F0; }
+
+    .kb-key.active-next {
+      background: var(--gold) !important; color: var(--navy) !important;
+      transform: translateY(1px); border-bottom-width: 1px;
+      box-shadow: 0 0 10px var(--gold); font-size: 13px; font-weight: 900;
+    }
+
+    .modal-overlay {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.75); display: none; justify-content: center; align-items: center; z-index: 20;
+      backdrop-filter: blur(4px);
+    }
+    .passport-book, .achievement-book {
+      background: var(--passport-page); border: 6px solid var(--passport-cover); border-radius: 14px;
+      width: 620px; height: 440px; padding: 20px; position: relative; display: flex; flex-direction: column;
+      justify-content: space-between; border-left: 10px solid #361C0A;
+    }
+    .passport-header, .book-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #D4AF37; padding-bottom: 6px; }
+    .passport-grid, .badges-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 10px 0; height: 310px; overflow-y: auto; padding: 4px; }
+
+    .stamp-slot {
+      background: #FFFDF7; border: 2px dashed #C8B29B; border-radius: 12px; padding: 10px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      cursor: pointer; transition: all 0.25s ease; position: relative;
+    }
+    .stamp-slot:hover { transform: translateY(-2px); box-shadow: 0 5px 12px rgba(0,0,0,0.12); border-color: var(--gold); }
+
+    .badge-circle {
+      width: 70px; height: 70px; border-radius: 50%;
+      display: flex; justify-content: center; align-items: center;
+      position: relative; transition: all 0.3s ease; box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+    }
+
+    .badge-circle.unlocked {
+      background: radial-gradient(circle, #FFFDF0 30%, #FFE082 100%);
+      border: 3px double #D4AF37; outline: 2px solid #B38700; outline-offset: -5px; font-size: 32px;
+    }
+    
+    .badge-circle.locked { background: #E0E0E0; border: 2px dashed #999; color: #777; font-size: 22px; filter: grayscale(0.8); }
+    .badge-click-hint { font-size: 9px; color: var(--gold); font-weight: bold; margin-top: 3px; }
+
+    .character-modal-card {
+      background: #FFFDF7; border: 4px solid var(--gold); border-radius: 16px;
+      padding: 16px; width: 500px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    .char-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 12px 0; }
+    .char-card {
+      background: #fff; border: 2px solid #E2E8F0; border-radius: 10px; padding: 8px;
+      cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; align-items: center;
+    }
+    .char-card:hover { border-color: var(--gold); transform: translateY(-2px); }
+    .char-card.selected { border-color: var(--green); background: #F0FDF4; border-width: 3px; }
+    
+    .char-card-img { width: 55px; height: 55px; border-radius: 50%; object-fit: contain; border: 1px solid #ddd; margin-bottom: 4px; background: #f9f9f9; }
+
+    .badge-card { background: #FFF; border: 2px solid #E2D4C9; border-radius: 10px; padding: 10px; text-align: center; position: relative; }
+    .badge-card.locked { background: #EAE3DC; border-style: dashed; }
+    .badge-card.locked .badge-icon { filter: grayscale(1) opacity(0.25); }
+    .badge-card.locked::after { content: '🔒'; position: absolute; top: 6px; right: 6px; font-size: 10px; }
+
+    .badge-icon { font-size: 32px; }
+    .close-modal { position: absolute; top: 10px; right: 14px; font-size: 20px; cursor: pointer; color: #888; }
+
+    .btn-card {
+      background: #FFF; border: 2px solid #E2D4C9; border-radius: 8px; padding: 8px; text-align: left;
+      cursor: pointer; transition: all 0.2s; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;
+    }
+    .btn-card:hover:not(.disabled) { border-color: var(--gold); transform: translateY(-2px); }
+    .btn-card.cleared { border-color: var(--green); background: #F0FDF4; }
+    .btn-card.disabled { background: #F1F5F9; border-color: #CBD5E1; opacity: 0.6; cursor: not-allowed; }
+
+    .clear-tag { font-size: 10px; font-weight: bold; padding: 2px 5px; border-radius: 5px; }
+    .clear-tag.done { background: #DCFCE7; color: var(--green); }
+    .clear-tag.none { background: #E2E8F0; color: #64748B; }
+    .clear-tag.locked { background: #CBD5E1; color: #94A3B8; }
+
+    .badge-unlock-card {
+      background: linear-gradient(135deg, #FFFDF7 0%, #FFF3D6 100%);
+      border: 4px solid var(--gold); border-radius: 20px; padding: 20px;
+      width: 380px; text-align: center; box-shadow: 0 15px 35px rgba(0,0,0,0.5);
+      position: relative; overflow: hidden; animation: badgePopUp 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+    @keyframes badgePopUp { 0% { transform: scale(0.3) rotate(-10deg); opacity: 0; } 70% { transform: scale(1.1) rotate(3deg); opacity: 1; } 100% { transform: scale(1) rotate(0deg); } }
+    
+    .confetti-particle {
+      position: absolute; width: 8px; height: 8px; border-radius: 2px;
+      animation: confettiFall 2.5s ease-out infinite; pointer-events: none;
+    }
+    @keyframes confettiFall { 0% { transform: translateY(-20px) rotate(0deg); opacity: 1; } 100% { transform: translateY(300px) rotate(720deg); opacity: 0; } }
+  </style>
+</head>
+<body>
+
+  <!-- 頂部資訊 -->
+  <header>
+    <div class="boarding-pass">
+      <div class="avatar-container">
+        <img id="headerAvatarSprite" class="avatar-img" src="" alt="Avatar" />
+        <div class="badge-rank">Lv.3</div>
+      </div>
+      <div class="player-info">
+        <h3 id="pilotHeaderName">請選擇陪同飛行員</h3>
+        <p>成就進度：<span id="headerBadgeCount" style="color:var(--gold); font-weight:bold;">0 / 4</span> 特殊徽章</p>
+      </div>
+    </div>
+    <div class="stats-bar">
+      <div class="stat-item">✈ 飛行里程: <b id="totalMiles">0 WPM</b></div>
+      <div class="stat-item">🛂 已開航國家: <b id="stampCount">0 / 8</b></div>
+    </div>
+  </header>
+
+  <!-- 大洲導航列 -->
+  <div class="continent-bar">
+    <button class="continent-btn active" id="cbtn-world" onclick="focusContinent('world')">🌐 全球航線圖</button>
+    <button class="continent-btn" id="cbtn-asia" onclick="focusContinent('asia')">🌏 亞洲 (珍奶/拉麵/泡菜)</button>
+    <button class="continent-btn" id="cbtn-europe" onclick="focusContinent('europe')">🌍 歐洲 (可頌/披薩)</button>
+    <button class="continent-btn" id="cbtn-north-america" onclick="focusContinent('north-america')">🌎 北美洲 (漢堡快餐)</button>
+    <button class="continent-btn" id="cbtn-south-america" onclick="focusContinent('south-america')">🌎 南美洲 (巴西窯烤)</button>
+    <button class="continent-btn" id="cbtn-africa" onclick="focusContinent('africa')">🌍 非洲 (魔幻香料)</button>
+    <button class="continent-btn" id="cbtn-oceania" onclick="focusContinent('oceania')">🌏 大洋洲 (肉派餐廳)</button>
+  </div>
+
+  <div class="view-container">
+    
+    <!-- 地圖視圖 -->
+    <div class="view active" id="mapView">
+      <div class="map-wrapper" id="mapContainer">
+        <svg id="worldMapSvg">
+          <g id="mapGroup"></g>
+          <g id="flightRoutesGroup"></g>
+        </svg>
+        <div id="pinLayer"></div>
+
+        <div class="pilot-guide-box">
+          <div class="pilot-avatar-wrap" id="pilotAvatarWrap">
+            <img id="guideAvatarSprite" class="avatar-img" src="" alt="Guide Avatar" />
+          </div>
+          <div class="pilot-dialog">
+            <h4 id="guidePilotTitle">陪同飛行員</h4>
+            <p id="guideDialogText">歡迎登機！請點擊【台灣】開始第一站的珍奶搖搖節奏廚房吧！</p>
+          </div>
+        </div>
+
+        <div class="bottom-triggers">
+          <div class="passport-trigger-btn" onclick="openPassportModal()">Passport 護照紀錄</div>
+          <div class="book-trigger-btn" onclick="openBookModal()">🏆 副本成就徽章</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 打字戰鬥視圖 -->
+    <div class="view" id="gameView">
+      <div class="game-wrapper">
+        <div class="game-header">
+          <button onclick="switchView('mapView')" style="background:none; border:none; cursor:pointer; font-weight:bold; color:var(--navy);">← 放棄返回</button>
+          <div style="display:flex; gap:12px; font-size:12px; font-weight:bold;">
+            <div>⏱️ 時間: <span id="timerText" style="color:var(--red);">0.0</span>s</div>
+            <div>⚠ 錯字: <span id="errorText" style="color:var(--red);">0</span></div>
+          </div>
+        </div>
+
+        <div class="timer-bar-container" id="timerBarContainer">
+          <div class="timer-bar-fill" id="timerBarFill"></div>
+        </div>
+
+        <div class="target-card" id="targetCardEl">
+          <div class="food-display" id="foodEmoji">🍜</div>
+          <div style="font-size: 12px; color: var(--gold); font-weight: bold;" id="stageTitle">STAGE 1</div>
+          
+          <div class="target-text-box" id="targetDisplay">fff jjj fjfj</div>
+          <p id="translation" style="font-size: 12px; color: #666; margin-bottom: 4px;">「F=加珍珠 J=倒奶茶 搖晃雪克杯！」</p>
+
+          <input type="text" class="input-box" id="typingInput" placeholder="請直接看螢幕打字，不看鍵盤！" oninput="handleTyping()" autofocus autocomplete="off">
+        </div>
+
+        <!-- 10 指盲打互動虛擬鍵盤 -->
+        <div class="keyboard-guide-wrap" id="virtualKeyboard">
+          <div class="finger-hint-banner" id="fingerGuideText">👉 請準備：將雙手食指放在 F 與 J 鍵上</div>
+          <div class="kb-row">
+            <div class="kb-key finger-lp" id="key-1">1</div>
+            <div class="kb-key finger-lp" id="key-2">2</div>
+            <div class="kb-key finger-lr" id="key-3">3</div>
+            <div class="kb-key finger-lm" id="key-4">4</div>
+            <div class="kb-key finger-li" id="key-5">5</div>
+            <div class="kb-key finger-ri" id="key-6">6</div>
+            <div class="kb-key finger-ri" id="key-7">7</div>
+            <div class="kb-key finger-rm" id="key-8">8</div>
+            <div class="kb-key finger-rr" id="key-9">9</div>
+            <div class="kb-key finger-rp" id="key-0">0</div>
+          </div>
+          <div class="kb-row">
+            <div class="kb-key finger-lp" id="key-q">Q</div>
+            <div class="kb-key finger-lr" id="key-w">W</div>
+            <div class="kb-key finger-lm" id="key-e">E</div>
+            <div class="kb-key finger-li" id="key-r">R</div>
+            <div class="kb-key finger-li" id="key-t">T</div>
+            <div class="kb-key finger-ri" id="key-y">Y</div>
+            <div class="kb-key finger-ri" id="key-u">U</div>
+            <div class="kb-key finger-rm" id="key-i">I</div>
+            <div class="kb-key finger-rr" id="key-o">O</div>
+            <div class="kb-key finger-rp" id="key-p">P</div>
+          </div>
+          <div class="kb-row">
+            <div class="kb-key finger-lp" id="key-a">A</div>
+            <div class="kb-key finger-lr" id="key-s">S</div>
+            <div class="kb-key finger-lm" id="key-d">D</div>
+            <div class="kb-key finger-li bump" id="key-f">F</div>
+            <div class="kb-key finger-li" id="key-g">G</div>
+            <div class="kb-key finger-ri" id="key-h">H</div>
+            <div class="kb-key finger-ri bump" id="key-j">J</div>
+            <div class="kb-key finger-rm" id="key-k">K</div>
+            <div class="kb-key finger-rr" id="key-l">L</div>
+            <div class="kb-key finger-rp" id="key-;">;</div>
+          </div>
+          <div class="kb-row">
+            <div class="kb-key finger-lp" id="key-shift" style="min-width:38px;">Shift</div>
+            <div class="kb-key finger-lp" id="key-z">Z</div>
+            <div class="kb-key finger-lr" id="key-x">X</div>
+            <div class="kb-key finger-lm" id="key-c">C</div>
+            <div class="kb-key finger-li" id="key-v">V</div>
+            <div class="kb-key finger-li" id="key-b">B</div>
+            <div class="kb-key finger-ri" id="key-n">N</div>
+            <div class="kb-key finger-ri" id="key-m">M</div>
+            <div class="kb-key finger-rm" id="key-,">,</div>
+            <div class="kb-key finger-rr" id="key-.">.</div>
+            <div class="kb-key finger-rp" id="key-!">!</div>
+          </div>
+          <div class="kb-row">
+            <div class="kb-key finger-thumb" id="key-space" style="width:180px;">Space 空白鍵</div>
+          </div>
+        </div>
+
+        <div style="font-size: 10px; color: #777;">Tip: 請跟隨鍵盤顏色與上方指法提示，堅持不看鍵盤練習！</div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 1. 角色選擇 Modal -->
+  <div class="modal-overlay" id="charSelectModal" style="display: flex;">
+    <div class="character-modal-card">
+      <h2 style="color:var(--passport-cover); font-size: 18px;">🧑‍✈️ 選擇您的 Lovely 陪同飛行員</h2>
+      <p style="font-size:11px; color:#666; margin-top:2px;">挑選一位可愛的 Lovely 夥伴陪伴您環遊世界打字吧！</p>
+
+      <div class="char-grid" id="charGrid"></div>
+
+      <button id="confirmCharBtn" onclick="confirmCharacterSelection()" style="background:var(--gold); border:none; padding:8px 24px; font-weight:bold; border-radius:18px; cursor:pointer; font-size:13px; color:var(--navy); opacity: 0.5;" disabled>確認夥伴，出發！</button>
+    </div>
+  </div>
+
+  <!-- 美食護照 Modal -->
+  <div class="modal-overlay" id="passportModal">
+    <div class="passport-book">
+      <span class="close-modal" onclick="closePassportModal()">&times;</span>
+      <div class="passport-header">
+        <div style="font-weight:bold;">📘 環球航線通關護照 (點擊圖章查看各國美食故事)</div>
+      </div>
+      <div class="passport-grid" id="passportGrid"></div>
+    </div>
+  </div>
+
+  <!-- 徽章美食特色中文介紹 Modal -->
+  <div class="modal-overlay" id="badgeDetailModal" style="z-index: 28;">
+    <div class="passport-book" style="width: 400px; height: auto; text-align: center; padding: 20px 24px;">
+      <span class="close-modal" onclick="closeBadgeDetailModal()">&times;</span>
+      <div style="font-size:10px; color:var(--gold); font-weight:bold; letter-spacing:1px;" id="detailCountryTitle">🇹🇼 台灣美食榮譽勳章</div>
+      
+      <div style="display:flex; justify-content:center; margin: 12px 0;">
+        <div class="badge-circle unlocked" id="detailBadgeCircle" style="width: 80px; height: 80px; font-size: 42px;">🧋</div>
+      </div>
+
+      <h3 id="detailBadgeName" style="color:var(--navy); font-size: 18px; margin-bottom: 6px;">珍珠奶茶與牛肉麵</h3>
+      
+      <div style="background:#FFF; border:1px solid #E2D4C9; border-radius:10px; padding:12px; text-align:left; font-size:12px; color:#444; line-height:1.5; margin-bottom: 14px;" id="detailFoodIntro">
+        台灣美食享譽國際，經典的 Q 彈珍珠奶茶搭配濃郁的高湯牛肉麵，完美融合在地街頭小吃文化與職人燉煮工藝。
+      </div>
+
+      <button onclick="closeBadgeDetailModal()" style="background:var(--gold); border:none; padding:6px 20px; font-weight:bold; border-radius:12px; cursor:pointer; color:var(--navy); font-size:12px;">收下徽章關閉</button>
+    </div>
+  </div>
+
+  <!-- 特殊成就徽章 Modal -->
+  <div class="modal-overlay" id="bookModal">
+    <div class="achievement-book">
+      <span class="close-modal" onclick="closeBookModal()">&times;</span>
+      <div class="book-header">
+        <div style="font-weight:bold;">🏆 副本成就限定徽章集冊</div>
+        <div style="font-size:11px;">已解鎖：<span id="unlockedCount">0</span> / 4</div>
+      </div>
+      <div class="badges-grid" id="badgesGrid"></div>
+    </div>
+  </div>
+
+  <!-- 國家專屬關卡選單 Modal -->
+  <div class="modal-overlay" id="levelModal">
+    <div class="passport-book" style="width: 440px; height: auto;">
+      <span class="close-modal" onclick="closeModal()">&times;</span>
+      <h2 style="text-align: center; color: var(--passport-cover); margin-bottom:2px;" id="countryModalTitle">🇹🇼 台灣美食挑戰</h2>
+      <p style="text-align:center; font-size:11px; color:var(--red); font-weight:bold; margin-bottom:10px;" id="mainProgressLabel">主線進度：0 / 3 (完成 3 關指法解鎖國家美食圖鑑)</p>
+      
+      <p style="font-size:11px; font-weight:bold; color:var(--navy); margin-bottom:4px;">📖 料理指法修煉關卡：</p>
+      
+      <div class="btn-card" id="btn-stage1" onclick="startCountryMode('stage1')">
+        <div>
+          <b id="stage1Name">第 1 关：備料初階指法</b>
+          <div style="font-size:10px; color:#666;" id="stage1Desc">基礎鍵位定位與單指打擊</div>
+        </div>
+        <span class="clear-tag none" id="tag-stage1">可挑戰</span>
+      </div>
+
+      <div class="btn-card" id="btn-stage2" onclick="startCountryMode('stage2')">
+        <div>
+          <b id="stage2Name">第 2 關：烹飪進階指法</b>
+          <div style="font-size:10px; color:#666;" id="stage2Desc">雙手交替與區域擴充指法</div>
+        </div>
+        <span class="clear-tag locked" id="tag-stage2">🔒 需過第1關</span>
+      </div>
+
+      <div class="btn-card" id="btn-stage3" onclick="startCountryMode('stage3')">
+        <div>
+          <b id="stage3Name">第 3 關：上菜流暢指法</b>
+          <div style="font-size:10px; color:#666;" id="stage3Desc">連打節奏與出餐盲打考驗</div>
+        </div>
+        <span class="clear-tag locked" id="tag-stage3">🔒 需過第2關</span>
+      </div>
+
+      <p style="font-size:11px; font-weight:bold; color:var(--red); margin:10px 0 4px 0;">🔥 超刺激特殊副本關卡：</p>
+      
+      <div style="display:flex; gap:8px;">
+        <div class="btn-card" id="btn-speed" style="flex:1;" onclick="startCountryMode('speed')">
+          <div>
+            <b>🔥 美食暴走 Fever</b>
+            <div style="font-size:9px; color:#666;">食材暴走極速連打</div>
+          </div>
+          <span class="clear-tag none" id="tag-speed">挑戰</span>
+        </div>
+
+        <div class="btn-card" id="btn-perfect" style="flex:1;" onclick="startCountryMode('perfect')">
+          <div>
+            <b>💣 廚房炸彈菜單</b>
+            <div style="font-size:9px; color:#666;">允許 0 錯字防炸彈</div>
+          </div>
+          <span class="clear-tag none" id="tag-perfect">挑戰</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 國家特色徽章解鎖動畫 Modal -->
+  <div class="modal-overlay" id="badgeUnlockModal" style="z-index: 30;">
+    <div class="badge-unlock-card" id="badgeUnlockCard">
+      <div id="confettiContainer"></div>
+      <h3 style="color:var(--passport-cover); font-size: 13px; text-transform: uppercase;">🎉 國家通關榮譽徽章解鎖！</h3>
+      
+      <div style="display:flex; justify-content:center; margin: 8px 0;">
+        <div class="badge-circle unlocked" id="unlockBadgeIcon" style="width:90px; height:90px; font-size:50px;">🧋</div>
+      </div>
+
+      <h2 id="unlockBadgeTitle" style="color:var(--navy); font-size: 18px; margin-bottom: 4px;">🇹🇼 寶島珍奶榮譽徽章</h2>
+      <p id="unlockBadgeDesc" style="font-size: 11px; color: #555; line-height: 1.4; margin-bottom: 14px;">恭喜您完美通過所有指法考驗，解鎖國家美食故事圖鑑！</p>
+      <button onclick="closeBadgeUnlockModal()" style="background:var(--gold); border:none; padding:8px 24px; font-weight:bold; border-radius:16px; cursor:pointer; font-size:13px; color:var(--navy);">太棒了，繼續旅程！</button>
+    </div>
+  </div>
+
+  <!-- 結算 / 自動銜接 Modal -->
+  <div class="modal-overlay" id="resultModal">
+    <div class="passport-book" style="width: 340px; height: auto; text-align: center; padding: 20px;">
+      <h2 id="resultTitle">🎉 美食順利出餐！</h2>
+      <div id="autoNextBanner" style="background:#DCFCE7; color:var(--green); font-size:12px; font-weight:bold; padding:6px; border-radius:8px; margin:8px 0;">
+        ⏱️ <span id="autoNextCount">3</span> 秒後自動無縫進入下一關...
+      </div>
+      <div id="badgeRewardNotice" style="display:none; color:var(--gold); font-weight:bold; margin-top:4px; font-size:12px;"></div>
+      <div style="margin: 10px 0; font-size: 13px; line-height: 1.6;">
+        <div>花費時間：<b id="resultTime" style="color:var(--red); font-size:16px;">0.0</b> 秒</div>
+        <div>打錯字數：<b id="resultErrors" style="color:var(--red);">0</b> 次</div>
+        <div>出餐速度：<b id="resultWPM" style="color:var(--green);">0</b> WPM</div>
+      </div>
+      <div style="display: flex; gap: 8px; justify-content: center;">
+        <button id="nextStageBtn" onclick="manualNextStageAction()" style="background:var(--green); color:white; border:none; padding:6px 14px; font-weight:bold; border-radius:12px; cursor:pointer;">立即下一關 👉</button>
+        <button onclick="closeResultModal()" style="background:var(--gold); border:none; padding:6px 14px; font-weight:bold; border-radius:12px; cursor:pointer;">返回地圖</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const charactersList = [
+      { id: 0, name: "SAVELY", file: "SAVELY.png" },
+      { id: 1, name: "MOVELY", file: "MOVELY.jpg" },
+      { id: 2, name: "NAVELY", file: "NAVELY.jpg" },
+      { id: 3, name: "TZUVELY", file: "TZUVELY.jpg" },
+      { id: 4, name: "JIVELY", file: "JIVELY.jpg" },
+      { id: 5, name: "CHAENGVELY", file: "CHAENGVELY.jpg" },
+      { id: 6, name: "DAVELY", file: "DAVELY.jpg" },
+      { id: 7, name: "JEONGVELY", file: "JEONGVELY.jpg" },
+      { id: 8, name: "MIVELY", file: "MIVELY.jpg" }
+    ];
+
+    const fingerMap = {
+      'a': { name: '左手小指', class: 'finger-lp' },
+      'q': { name: '左手小指', class: 'finger-lp' },
+      'z': { name: '左手小指', class: 'finger-lp' },
+      '1': { name: '左手小指', class: 'finger-lp' },
+      's': { name: '左手無名指', class: 'finger-lr' },
+      'w': { name: '左手無名指', class: 'finger-lr' },
+      'x': { name: '左手無名指', class: 'finger-lr' },
+      '2': { name: '左手無名指', class: 'finger-lr' },
+      'd': { name: '左手中指', class: 'finger-lm' },
+      'e': { name: '左手中指', class: 'finger-lm' },
+      'c': { name: '左手中指', class: 'finger-lm' },
+      '3': { name: '左手中指', class: 'finger-lm' },
+      'f': { name: '左手食指 (基準鍵)', class: 'finger-li' },
+      'r': { name: '左手食指', class: 'finger-li' },
+      'v': { name: '左手食指', class: 'finger-li' },
+      '4': { name: '左手食指', class: 'finger-li' },
+      'g': { name: '左手食指 (向右伸)', class: 'finger-li' },
+      't': { name: '左手食指 (向上伸)', class: 'finger-li' },
+      'b': { name: '左手食指 (向下伸)', class: 'finger-li' },
+      '5': { name: '左手食指', class: 'finger-li' },
+      'j': { name: '右手食指 (基準鍵)', class: 'finger-ri' },
+      'u': { name: '右手食指', class: 'finger-ri' },
+      'm': { name: '右手食指', class: 'finger-ri' },
+      '7': { name: '右手食指', class: 'finger-ri' },
+      'h': { name: '右手食指 (向左伸)', class: 'finger-ri' },
+      'y': { name: '右手食指 (向上伸)', class: 'finger-ri' },
+      'n': { name: '右手食指 (向下伸)', class: 'finger-ri' },
+      '6': { name: '右手食指', class: 'finger-ri' },
+      'k': { name: '右手中指', class: 'finger-rm' },
+      'i': { name: '右手中指', class: 'finger-rm' },
+      ',': { name: '右手中指', class: 'finger-rm' },
+      '8': { name: '右手中指', class: 'finger-rm' },
+      'l': { name: '右手無名指', class: 'finger-rr' },
+      'o': { name: '右手無名指', class: 'finger-rr' },
+      '.': { name: '右手無名指', class: 'finger-rr' },
+      '9': { name: '右手無名指', class: 'finger-rr' },
+      ';': { name: '右手小指', class: 'finger-rp' },
+      'p': { name: '右手小指', class: 'finger-rp' },
+      '!': { name: '右手小指', class: 'finger-rp' },
+      '0': { name: '右手小指', class: 'finger-rp' },
+      ' ': { name: '大拇指 (按空白鍵)', class: 'finger-thumb' }
+    };
+
+    const worldData = [
+      { id: 'taiwan', name: '🇹🇼 台灣', code: 'tw', continent: 'asia', lon: 121.0, lat: 23.5, unlocked: true, badgeIcon: '🧋', badgeTitle: '🇹🇼 珍珠奶茶與牛肉麵', badgeDesc: '掌握 F/J 基準鍵搖搖節奏，獲得台灣美食認證！', foodIntro: '台灣國寶級飲品「珍珠奶茶」發源自台中/台南，以濃育奶茶搭配黑糖慢燉的 Q 彈珍珠；加上牛肉麵的清燉紅燒兩派工藝，成為全球馳名的夜市靈魂美食。' },
+      { id: 'japan', name: '🇯🇵 日本', code: 'jp', continent: 'asia', lon: 138.2, lat: 36.2, unlocked: false, badgeIcon: '🍜', badgeTitle: '🇯🇵 職人豚骨拉麵', badgeDesc: '掌握 Home Row 基準列切叉燒甩麵節奏！', foodIntro: '日本料理講究匠人精神。博多豚骨拉麵使用大火長時間熬煮豬骨至乳白色濃厚高湯，搭配細直麵、炙燒叉燒與糖心蛋，完美呈現極致和風美食文化。' },
+      { id: 'korea', name: '🇰🇷 韓國', code: 'kr', continent: 'asia', lon: 127.7, lat: 35.9, unlocked: false, badgeIcon: '🍲', badgeTitle: '🇰🇷 宮廷石鍋拌飯', badgeDesc: '掌握上排鍵位塗抹特製韓式辣醬節奏！', foodIntro: '韓國經典發酵美食「泡菜」與「石鍋拌飯」。將米飯置於滾燙石鍋中，鋪上五色蔬菜與牛肉，淋上特製辣椒醬拌勻，滋滋作響伴隨金黃焦香鍋巴。' },
+      { id: 'thailand', name: '🇹🇭 泰國', code: 'th', continent: 'asia', lon: 100.5, lat: 13.7, unlocked: false, badgeIcon: '🥣', badgeTitle: '🇹🇭 冬蔭功酸辣湯', badgeDesc: '掌握下排鍵位搗碎南洋香料節奏！', foodIntro: '泰國國寶級湯品「冬蔭功（酸辣蝦湯）」，運用香茅、檸檬葉、南薑、泰國朝天椒與鮮蝦熬煮，酸辣交織、香氣四溢，是南洋熱帶美味的最高象徵。' },
+      { id: 'france', name: '🇫🇷 法國', code: 'fr', continent: 'europe', lon: 2.2, lat: 46.2, unlocked: false, badgeIcon: '🥐', badgeTitle: '🇫🇷 金黃蜂巢可頌', badgeDesc: '掌握 QWERTY 烘焙揉麵團交替指法！', foodIntro: '法國烘焙工藝極致「法式可頌」，將優質發酵奶油裹入麵糰中，經過多次摺疊發酵烤製，呈現外皮金黃酥脆、內部呈完美蜂巢狀的濃郁奶油層次。' },
+      { id: 'italy', name: '🇮🇹 義大利', code: 'it', continent: 'europe', lon: 12.5, lat: 41.8, unlocked: false, badgeIcon: '🍕', badgeTitle: '🇮🇹 拿坡里手工披薩', badgeDesc: '掌握地中海窯烤甩餅與起司拉絲指法！', foodIntro: '義大利拿坡里傳統窯烤披薩，嚴選天然酵母麵糰、莫札瑞拉起司與新鮮羅勒葉，經攝氏480度火山岩窯爐高溫快烤90秒，餅皮香 Q 帶有微焦香氣。' },
+      { id: 'usa', name: '🇺🇸 美國', code: 'us', continent: 'north-america', lon: -95.7, lat: 37.0, unlocked: false, badgeIcon: '🍔', badgeTitle: '🇺🇸 雙層牛肉漢堡', badgeDesc: '掌握美式速食煎肉排與壓醬汁節奏！', foodIntro: '美式飲食文化代表「多汁牛肉漢堡」，厚實飽滿的 100% 純牛肉漢堡排在鐵板上煎出誘人肉汁，搭配融化切達起司、酸黃瓜與特製醬汁。' },
+      { id: 'brazil', name: '🇧🇷 巴西', code: 'br', continent: 'south-america', lon: -51.9, lat: -14.2, unlocked: false, badgeIcon: '🥩', badgeTitle: '🇧🇷 桑巴巴西窯烤', badgeDesc: '掌握狂歡節炭火切肉炭烤節奏！', foodIntro: '巴西 Churrasco 傳統窯烤肉，將頂級牛後臀尖肉（Picanha）串於長鐵籤上，僅以粗鹽調味後經炭火大火慢烤，外酥內嫩多汁，展現南美盛情熱帶風情。' }
+    ];
+
+    const continentViews = {
+      'world': { center: [0, 20], zoom: 1 },
+      'asia': { center: [110, 28], zoom: 2.8 },
+      'europe': { center: [15, 52], zoom: 3.5 },
+      'north-america': { center: [-98, 38], zoom: 2.5 },
+      'south-america': { center: [-60, -22], zoom: 2.3 },
+      'africa': { center: [20, 2], zoom: 2.3 },
+      'oceania': { center: [138, -25], zoom: 2.8 }
+    };
+
+    const countryQuestions = {
+      taiwan: {
+        stage1: [{ target: "fff jjj fjfj", zh: "F=加珍珠 J=倒奶茶 搖晃雪克杯", icon: "🧋" }],
+        stage2: [{ target: "fjfj fffj jjjf", zh: "雙手交替快速搖珍奶", icon: "🧋" }],
+        stage3: [{ target: "fj fj ff jj fjfj", zh: "夜市珍珠奶茶完美出餐", icon: "🧋" }],
+        speed: [{ target: "ffff jjjj fjfj", zh: "🔥 美食暴走狂搖珍奶", icon: "⚡" }],
+        perfect: [{ target: "fff jjj fjfj", zh: "💣 廚房防炸彈 0 錯字考驗", icon: "🎯" }]
+      },
+      japan: {
+        stage1: [{ target: "asdf jkl; asdf", zh: "A/S/D/F=切叉燒 J/K/L/;=甩麵水", icon: "🍜" }],
+        stage2: [{ target: "asdfjkl; fdsajkl;", zh: "職人拉麵雙手連打節奏", icon: "🍜" }],
+        stage3: [{ target: "a s d f j k l ;", zh: "豚骨拉麵熱騰騰上菜", icon: "🍜" }],
+        speed: [{ target: "asdf jkl; fjad", zh: "🔥 美食暴走極速甩麵", icon: "⚡" }],
+        perfect: [{ target: "asdf jkl; asdf", zh: "💣 廚房防炸彈 0 錯字考驗", icon: "🎯" }]
+      }
+    };
+
+    const badgesData = [
+      { id: 'badge_speed', name: '⚡ 音速極速廚神', icon: '⚡', desc: '成功通過任何國家的「美食暴走」副本', unlocked: false },
+      { id: 'badge_perfect', name: '🎯 零失誤完美大師', icon: '🎯', desc: '成功通過任何國家的「炸彈菜單」副本', unlocked: false },
+      { id: 'badge_tw_master', name: '🇹🇼 寶島珍奶通', icon: '🇹🇼', desc: '通關台灣所有的料理指法關卡', unlocked: false },
+      { id: 'badge_jp_master', name: '🇯🇵 匠人拉麵王', icon: '🇯🇵', desc: '通關日本所有的料理指法關卡', unlocked: false }
+    ];
+
+    let userProgress = { taiwan: {} };
+    let currentSelectedCountry = worldData[0];
+    let currentModeKey = 'stage1';
+    let currentList = [];
+    let currentIndex = 0;
+    let timerInterval = null;
+    let autoNextInterval = null;
+    let startTime = 0;
+    let elapsedTime = 0;
+    let errorCount = 0;
+    let comboCount = 0;
+    let svg, g, flightG, projection;
+    let currentTx = 0, currentTy = 0, currentK = 1;
+    let selectedCharId = null;
+
+    const SPEED_MODE_TIME_LIMIT = 12; 
+    let timeRemaining = SPEED_MODE_TIME_LIMIT;
+
+    function initCharacterSelection() {
+      const grid = document.getElementById('charGrid');
+      grid.innerHTML = '';
+
+      charactersList.forEach((char, idx) => {
+        const card = document.createElement('div');
+        card.className = 'char-card';
+        card.id = `char-card-${idx}`;
+        card.onclick = () => selectChar(idx);
+
+        card.innerHTML = `
+          <img class="char-card-img" src="${char.file}" alt="${char.name}" />
+          <div style="font-size:10px; font-weight:bold; color:var(--navy);">${char.name}</div>
+        `;
+        grid.appendChild(card);
+      });
+    }
+
+    function selectChar(idx) {
+      selectedCharId = idx;
+      document.querySelectorAll('.char-card').forEach(c => c.classList.remove('selected'));
+      document.getElementById(`char-card-${idx}`).classList.add('selected');
+
+      const btn = document.getElementById('confirmCharBtn');
+      btn.disabled = false;
+      btn.style.opacity = '1';
+    }
+
+    function confirmCharacterSelection() {
+      if (selectedCharId === null) return;
+
+      const char = charactersList[selectedCharId];
+
+      document.getElementById('headerAvatarSprite').src = char.file;
+      document.getElementById('guideAvatarSprite').src = char.file;
+
+      document.getElementById('pilotHeaderName').innerText = `${char.name} (陪同飛行員)`;
+      document.getElementById('guidePilotTitle').innerText = `陪同飛行員：${char.name}`;
+
+      document.getElementById('charSelectModal').style.display = 'none';
+      updatePilotGuide("歡迎登機！請點擊【台灣】開始第一站的珍奶搖搖節奏廚房吧！");
+    }
+
+    function updatePilotGuide(msg) {
+      const el = document.getElementById('guideDialogText');
+      if (el) el.innerText = msg;
+    }
+
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    function playErrorSound() {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(140, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(80, audioCtx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(); osc.stop(audioCtx.currentTime + 0.15);
+    }
+
+    function playKeySound() {
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(440, audioCtx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.08);
+      gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.08);
+      osc.connect(gain); gain.connect(audioCtx.destination);
+      osc.start(); osc.stop(audioCtx.currentTime + 0.08);
+    }
+
+    function initMap() {
+      const container = document.getElementById('mapContainer');
+      const width = container.clientWidth, height = container.clientHeight;
+      svg = d3.select("#worldMapSvg").attr("viewBox", `0 0 ${width} ${height}`);
+      g = d3.select("#mapGroup");
+      flightG = d3.select("#flightRoutesGroup");
+
+      projection = d3.geoEquirectangular().scale(width / 6.2).translate([width / 2, height / 2 + 30]);
+      const pathGenerator = d3.geoPath().projection(projection);
+
+      d3.json("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json").then(data => {
+        const countries = topojson.feature(data, data.objects.countries);
+        g.selectAll("path").data(countries.features).enter().append("path").attr("class", "country-shape").attr("d", pathGenerator);
+        renderCountryPins();
+      });
+    }
+
+    function renderFlightRoutes() {
+      flightG.selectAll("*").remove();
+
+      for (let i = 0; i < worldData.length - 1; i++) {
+        const c1 = worldData[i];
+        const c2 = worldData[i + 1];
+
+        const prog1 = userProgress[c1.id] || {};
+        const c1Cleared = prog1.stage1 && prog1.stage2 && prog1.stage3;
+
+        if (c1Cleared) {
+          const p1 = projection([c1.lon, c1.lat]);
+          const p2 = projection([c2.lon, c2.lat]);
+
+          if (p1 && p2) {
+            const dx = p2[0] - p1[0];
+            const dy = p2[1] - p1[1];
+            const dr = Math.sqrt(dx * dx + dy * dy) * 0.8;
+
+            const pathD = `M ${p1[0]} ${p1[1]} A ${dr} ${dr} 0 0 1 ${p2[0]} ${p2[1]}`;
+
+            flightG.append("path")
+              .attr("d", pathD)
+              .attr("class", "flight-line");
+          }
+        }
+      }
+    }
+
+    function renderCountryPins() {
+      const pinLayer = document.getElementById('pinLayer');
+      pinLayer.innerHTML = '';
+
+      const activeUncompletedIndex = worldData.findIndex(c => {
+        const prog = userProgress[c.id] || {};
+        return !(prog.stage1 && prog.stage2 && prog.stage3);
+      });
+
+      worldData.forEach((c, idx) => {
+        const flagUrl = `https://flagcdn.com/w80/${c.code}.png`;
+        const prog = userProgress[c.id] || {};
+        const mainCleared = prog.stage1 && prog.stage2 && prog.stage3;
+        const allCleared = mainCleared && prog.speed && prog.perfect;
+
+        let isPlayable = false;
+        if (mainCleared) isPlayable = true;
+        else if (idx === activeUncompletedIndex) isPlayable = true;
+
+        c.unlocked = isPlayable;
+
+        const isCurrentActivePlaneTarget = (idx === activeUncompletedIndex);
+
+        const pin = document.createElement('div');
+        let pinClass = 'locked';
+        if (allCleared) pinClass = 'perfect-cleared unlocked';
+        else if (mainCleared) pinClass = 'unlocked';
+        else if (isPlayable) pinClass = 'active-target';
+
+        pin.className = `node-pin ${pinClass}`;
+        pin.id = `pin-${c.id}`;
+
+        let statusText = '';
+        if (allCleared) statusText = '★ 大滿貫';
+        else if (mainCleared) statusText = '✓ 已通關';
+        else if (isPlayable) statusText = '進行中';
+
+        pin.innerHTML = `
+          ${isCurrentActivePlaneTarget ? '<div class="plane-badge">✈️</div>' : ''}
+          <div class="pin-icon">
+            <img class="flag-img" src="${flagUrl}" alt="${c.name}" />
+            ${!isPlayable ? '<div class="lock-overlay">🔒</div>' : ''}
+          </div>
+          <div class="pin-label">${c.name} ${statusText ? `(${statusText})` : ''}</div>
+        `;
+
+        if (isPlayable) {
+          pin.onclick = () => openLevelModal(c);
+        }
+        pinLayer.appendChild(pin);
+      });
+
+      renderFlightRoutes();
+      updatePinPositions(currentTx, currentTy, currentK);
+
+      if (activeUncompletedIndex !== -1) {
+        const targetC = worldData[activeUncompletedIndex];
+        const prog = userProgress[targetC.id] || {};
+        if (!prog.stage1) {
+          updatePilotGuide(`我們抵達了【${targetC.name}】！快點擊進入第 1 關解鎖料理指法吧！`);
+        } else if (!prog.stage2) {
+          updatePilotGuide(`太棒了！【${targetC.name}】第 1 關已過，繼續挑戰第 2 關！`);
+        } else if (!prog.stage3) {
+          updatePilotGuide(`只差臨門一腳！完成【${targetC.name}】第 3 關就能解鎖國家美食圖鑑！`);
+        }
+      } else {
+        updatePilotGuide("恭喜您！全球美食指法航線已全數完美通關！您是頂級美食指法大師！");
+      }
+
+      document.getElementById('stampCount').innerText = `${worldData.filter(x => {
+        const prog = userProgress[x.id] || {};
+        return prog.stage1 && prog.stage2 && prog.stage3;
+      }).length} / ${worldData.length}`;
+    }
+
+    function updatePinPositions(tx = 0, ty = 0, k = 1) {
+      worldData.forEach(c => {
+        const pin = document.getElementById(`pin-${c.id}`);
+        if (!pin) return;
+        const coords = projection([c.lon, c.lat]);
+        if (coords) {
+          const x = coords[0] * k + tx;
+          const y = coords[1] * k + ty;
+          pin.style.left = `${x}px`;
+          pin.style.top = `${y}px`;
+          const pinScale = Math.max(0.7, 1 / Math.pow(k, 0.4));
+          pin.style.transform = `translate(-50%, -50%) scale(${pinScale})`;
+        }
+      });
+    }
+
+    function focusContinent(continentKey) {
+      document.querySelectorAll('.continent-btn').forEach(btn => btn.classList.remove('active'));
+      const targetBtn = document.getElementById(`cbtn-${continentKey}`);
+      if(targetBtn) targetBtn.classList.add('active');
+
+      const view = continentViews[continentKey] || continentViews['world'];
+      const container = document.getElementById('mapContainer');
+      const width = container.clientWidth, height = container.clientHeight;
+
+      const centerCoords = projection(view.center);
+      const k = view.zoom;
+      const tx = width / 2 - k * centerCoords[0];
+      const ty = height / 2 - k * centerCoords[1];
+
+      g.transition().duration(800).ease(d3.easeCubicInOut)
+        .attr("transform", `translate(${tx},${ty}) scale(${k})`);
+
+      flightG.transition().duration(800).ease(d3.easeCubicInOut)
+        .attr("transform", `translate(${tx},${ty}) scale(${k})`);
+
+      const startTime = Date.now();
+      const startTx = currentTx, startTy = currentTy, startK = currentK;
+      
+      d3.timer(() => {
+        const elapsed = Date.now() - startTime;
+        const t = Math.min(1, elapsed / 800);
+        const easeT = d3.easeCubicInOut(t);
+        const curTx = startTx + (tx - startTx) * easeT;
+        const curTy = startTy + (ty - startTy) * easeT;
+        const curK = startK + (k - startK) * easeT;
+        
+        updatePinPositions(curTx, curTy, curK);
+
+        if (t >= 1) {
+          currentTx = tx; currentTy = ty; currentK = k;
+          return true;
+        }
+      });
+    }
+
+    function openLevelModal(country) {
+      currentSelectedCountry = country;
+      document.getElementById('countryModalTitle').innerText = `${country.name} 美食指法廚房`;
+
+      const prog = userProgress[country.id] || {};
+
+      let mainClearedCount = 0;
+      if (prog.stage1) mainClearedCount++;
+      if (prog.stage2) mainClearedCount++;
+      if (prog.stage3) mainClearedCount++;
+
+      document.getElementById('mainProgressLabel').innerText = `主線進度：${mainClearedCount} / 3 (完成 3 關解鎖國家美食圖鑑與下一國)`;
+
+      ['stage1', 'stage2', 'stage3', 'speed', 'perfect'].forEach((stg, idx) => {
+        const btn = document.getElementById(`btn-${stg}`);
+        const tag = document.getElementById(`tag-${stg}`);
+        if (!btn || !tag) return;
+
+        if (prog[stg]) {
+          btn.className = 'btn-card cleared';
+          tag.className = 'clear-tag done';
+          tag.innerText = '✓ 已完成';
+        } else if (stg === 'stage1' || (stg === 'stage2' && prog.stage1) || (stg === 'stage3' && prog.stage2) || stg === 'speed' || stg === 'perfect') {
+          btn.className = 'btn-card';
+          tag.className = 'clear-tag none';
+          tag.innerText = '可挑戰';
+        } else {
+          btn.className = 'btn-card disabled';
+          tag.className = 'clear-tag locked';
+          tag.innerText = `🔒 需過第${idx}關`;
+        }
+      });
+
+      document.getElementById('levelModal').style.display = 'flex';
+    }
+
+    function closeModal() { document.getElementById('levelModal').style.display = 'none'; }
+
+    function autoFocusInput() {
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          const inputEl = document.getElementById('typingInput');
+          if (inputEl) {
+            inputEl.focus();
+            inputEl.select();
+          }
+        }, 50);
+      });
+    }
+
+    function startCountryMode(modeKey) {
+      const prog = userProgress[currentSelectedCountry.id] || {};
+
+      if (modeKey === 'stage2' && !prog.stage1) return alert("🔒 請先完成「第 1 關」！");
+      if (modeKey === 'stage3' && !prog.stage2) return alert("🔒 請先完成「第 2 關」！");
+
+      closeModal();
+      switchView('gameView');
+      
+      currentModeKey = modeKey;
+      const qSet = countryQuestions[currentSelectedCountry.id] || countryQuestions['taiwan'];
+      currentList = qSet[modeKey] || qSet['stage1'];
+      currentIndex = 0;
+      errorCount = 0;
+      comboCount = 0;
+
+      document.getElementById('errorText').innerText = errorCount;
+      document.getElementById('stageTitle').innerText = `${currentSelectedCountry.name}: ${modeKey.toUpperCase()}`;
+      
+      loadItem(currentList[currentIndex]);
+      startTimer();
+      autoFocusInput();
+    }
+
+    function loadItem(item) {
+      document.getElementById('foodEmoji').innerText = item.icon;
+      document.getElementById('translation').innerText = `「${item.zh}」`;
+      document.getElementById('typingInput').value = '';
+      updateTargetDisplay(item.target, '');
+      autoFocusInput();
+    }
+
+    function updateTargetDisplay(target, inputVal) {
+      let html = '';
+      for (let i = 0; i < target.length; i++) {
+        if (i < inputVal.length) html += `<span class="correct-char">${target[i]}</span>`;
+        else if (i === inputVal.length) html += `<span class="current-char">${target[i]}</span>`;
+        else html += target[i];
+      }
+      document.getElementById('targetDisplay').innerHTML = html;
+
+      const nextChar = target[inputVal.length] ? target[inputVal.length].toLowerCase() : '';
+      updateVirtualKeyboardHighlight(nextChar);
+    }
+
+    function updateVirtualKeyboardHighlight(char) {
+      document.querySelectorAll('.kb-key').forEach(k => k.classList.remove('active-next'));
+
+      if (!char) {
+        document.getElementById('fingerGuideText').innerText = "🎉 太棒了！料理動作完成！";
+        return;
+      }
+
+      let keyId = `key-${char}`;
+      if (char === ' ') keyId = 'key-space';
+
+      const keyEl = document.getElementById(keyId);
+      if (keyEl) keyEl.classList.add('active-next');
+
+      const info = fingerMap[char];
+      if (info) {
+        document.getElementById('fingerGuideText').innerHTML = `👉 下一個打擊動作【<b style="color:var(--gold);">${char.toUpperCase()}</b>】：請用 <span style="color:var(--gold); font-size:13px;">[${info.name}]</span> 打擊`;
+      } else {
+        document.getElementById('fingerGuideText').innerText = `👉 請按下鍵盤上的 [${char.toUpperCase()}]`;
+      }
+    }
+
+    function triggerComboFloat(txt) {
+      const card = document.getElementById('targetCardEl');
+      const el = document.createElement('div');
+      el.className = 'combo-float';
+      el.innerText = txt;
+      card.appendChild(el);
+      setTimeout(() => el.remove(), 600);
+    }
+
+    function handleTyping() {
+      const inputVal = document.getElementById('typingInput').value;
+      const targetText = currentList[currentIndex].target;
+
+      if (inputVal.length > 0 && !targetText.startsWith(inputVal)) {
+        playErrorSound();
+        errorCount++;
+        comboCount = 0;
+        document.getElementById('errorText').innerText = errorCount;
+
+        const pilotWrap = document.getElementById('pilotAvatarWrap');
+        if(pilotWrap) {
+          pilotWrap.classList.add('panic');
+          setTimeout(() => pilotWrap.classList.remove('panic'), 400);
+        }
+
+        const inputEl = document.getElementById('typingInput');
+        inputEl.classList.add('error-flash');
+        setTimeout(() => inputEl.classList.remove('error-flash'), 200);
+
+        document.getElementById('typingInput').value = inputVal.substring(0, inputVal.length - 1);
+
+        if (currentModeKey === 'perfect') {
+          stopTimer();
+          alert("💣 廚房爆炸！不小心按錯鍵，炸彈被引爆了！");
+          switchView('mapView');
+        }
+        return;
+      }
+
+      playKeySound();
+      comboCount++;
+
+      if (comboCount % 3 === 0) {
+        triggerComboFloat(`🔥 Combo x${comboCount}!`);
+      }
+
+      const foodEmoji = document.getElementById('foodEmoji');
+      foodEmoji.classList.add('bounce');
+      setTimeout(() => foodEmoji.classList.remove('bounce'), 100);
+
+      const pilotWrap = document.getElementById('pilotAvatarWrap');
+      if(pilotWrap) {
+        pilotWrap.classList.add('cheer');
+        setTimeout(() => pilotWrap.classList.remove('cheer'), 300);
+      }
+
+      updateTargetDisplay(targetText, inputVal);
+
+      if (inputVal === targetText) {
+        currentIndex++;
+        if (currentIndex < currentList.length) {
+          loadItem(currentList[currentIndex]);
+        } else {
+          finishStage();
+        }
+      }
+    }
+
+    function startTimer() {
+      clearInterval(timerInterval);
+      startTime = Date.now();
+      
+      const timerBarContainer = document.getElementById('timerBarContainer');
+      const timerBarFill = document.getElementById('timerBarFill');
+
+      if (currentModeKey === 'speed') {
+        timeRemaining = SPEED_MODE_TIME_LIMIT;
+        timerBarContainer.style.display = 'block';
+        timerBarFill.style.width = '100%';
+        document.getElementById('timerText').innerText = timeRemaining.toFixed(1);
+
+        timerInterval = setInterval(() => {
+          elapsedTime = (Date.now() - startTime) / 1000;
+          let left = SPEED_MODE_TIME_LIMIT - elapsedTime;
+          
+          if (left <= 0) {
+            left = 0;
+            stopTimer();
+            playErrorSound();
+            alert("⏱️ 時間到！暴走食材逃跑了！");
+            switchView('mapView');
+            return;
+          }
+          
+          document.getElementById('timerText').innerText = left.toFixed(1);
+          let percentage = (left / SPEED_MODE_TIME_LIMIT) * 100;
+          timerBarFill.style.width = `${percentage}%`;
+        }, 50);
+
+      } else {
+        timerBarContainer.style.display = 'none';
+        timerInterval = setInterval(() => {
+          elapsedTime = (Date.now() - startTime) / 1000;
+          document.getElementById('timerText').innerText = elapsedTime.toFixed(1);
+        }, 100);
+      }
+    }
+
+    function stopTimer() { clearInterval(timerInterval); clearInterval(autoNextInterval); }
+
+    function finishStage() {
+      stopTimer();
+      const totalTime = elapsedTime.toFixed(1);
+      let totalChars = currentList.reduce((sum, item) => sum + item.target.length, 0);
+      let wpm = Math.round((totalChars / 5) / (totalTime / 60)) || 0;
+
+      if (!userProgress[currentSelectedCountry.id]) userProgress[currentSelectedCountry.id] = {};
+      
+      const wasStage3AlreadyCleared = userProgress[currentSelectedCountry.id].stage3;
+      userProgress[currentSelectedCountry.id][currentModeKey] = true;
+
+      const prog = userProgress[currentSelectedCountry.id];
+      let rewardNotice = "";
+      let isJustCompletedAllMainStages = false;
+
+      if (prog.stage1 && prog.stage2 && prog.stage3) {
+        if (currentModeKey === 'stage3' && !wasStage3AlreadyCleared) {
+          isJustCompletedAllMainStages = true;
+        }
+
+        const currentIdx = worldData.findIndex(c => c.id === currentSelectedCountry.id);
+        if (currentIdx !== -1 && currentIdx + 1 < worldData.length) {
+          rewardNotice = `🎉 恭喜通關全部主線！正式為您開啟下一個國家航線：【${worldData[currentIdx + 1].name}】！`;
+        }
+      }
+
+      if (currentModeKey === 'speed') {
+        const badge = badgesData.find(b => b.id === 'badge_speed');
+        if (badge && !badge.unlocked) {
+          badge.unlocked = true;
+          rewardNotice = "🏆 恭喜解鎖限定徽章：【⚡ 音速極速廚神】！";
+        }
+      } else if (currentModeKey === 'perfect') {
+        const badge = badgesData.find(b => b.id === 'badge_perfect');
+        if (badge && !badge.unlocked) {
+          badge.unlocked = true;
+          rewardNotice = "🏆 恭喜解鎖限定徽章：【🎯 零失誤完美大師】！";
+        }
+      }
+
+      document.getElementById('resultTime').innerText = totalTime;
+      document.getElementById('resultErrors').innerText = errorCount;
+      document.getElementById('resultWPM').innerText = wpm;
+
+      const noticeEl = document.getElementById('badgeRewardNotice');
+      if (rewardNotice) {
+        noticeEl.innerText = rewardNotice;
+        noticeEl.style.display = 'block';
+      } else {
+        noticeEl.style.display = 'none';
+      }
+
+      if (isJustCompletedAllMainStages) {
+        showBadgeUnlockModal(currentSelectedCountry);
+      } else {
+        document.getElementById('resultModal').style.display = 'flex';
+        startAutoNextCountdown();
+      }
+
+      updateHeaderStats();
+    }
+
+    function startAutoNextCountdown() {
+      let count = 3;
+      const countEl = document.getElementById('autoNextCount');
+      countEl.innerText = count;
+
+      clearInterval(autoNextInterval);
+      autoNextInterval = setInterval(() => {
+        count--;
+        if (count > 0) {
+          countEl.innerText = count;
+        } else {
+          clearInterval(autoNextInterval);
+          manualNextStageAction();
+        }
+      }, 1000);
+    }
+
+    function manualNextStageAction() {
+      clearInterval(autoNextInterval);
+      document.getElementById('resultModal').style.display = 'none';
+
+      if (currentModeKey === 'stage1') startCountryMode('stage2');
+      else if (currentModeKey === 'stage2') startCountryMode('stage3');
+      else {
+        renderCountryPins();
+        switchView('mapView');
+      }
+    }
+
+    function showBadgeUnlockModal(country) {
+      document.getElementById('unlockBadgeIcon').innerText = country.badgeIcon || '🏆';
+      document.getElementById('unlockBadgeTitle').innerText = country.badgeTitle || `${country.name} 美食榮譽徽章`;
+      document.getElementById('unlockBadgeDesc').innerText = country.badgeDesc || `恭喜您順利完成${country.name}所有指法挑戰，解鎖美食故事圖鑑！`;
+
+      const confettiContainer = document.getElementById('confettiContainer');
+      confettiContainer.innerHTML = '';
+      const colors = ['#F2A93B', '#E65F5C', '#2A9D8F', '#72B2D6', '#E9C46A'];
+
+      for (let i = 0; i < 30; i++) {
+        const p = document.createElement('div');
+        p.className = 'confetti-particle';
+        p.style.left = `${Math.random() * 100}%`;
+        p.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+        p.style.animationDelay = `${Math.random() * 1.5}s`;
+        p.style.animationDuration = `${1.8 + Math.random() * 1.5}s`;
+        confettiContainer.appendChild(p);
+      }
+
+      document.getElementById('badgeUnlockModal').style.display = 'flex';
+    }
+
+    function closeBadgeUnlockModal() {
+      document.getElementById('badgeUnlockModal').style.display = 'none';
+      document.getElementById('resultModal').style.display = 'flex';
+      startAutoNextCountdown();
+    }
+
+    function closeResultModal() {
+      clearInterval(autoNextInterval);
+      document.getElementById('resultModal').style.display = 'none';
+      renderCountryPins();
+      switchView('mapView');
+    }
+
+    function updateHeaderStats() {
+      const unlockedBadges = badgesData.filter(b => b.unlocked).length;
+      document.getElementById('headerBadgeCount').innerText = `${unlockedBadges} / ${badgesData.length}`;
+      document.getElementById('unlockedCount').innerText = unlockedBadges;
+    }
+
+    function switchView(viewId) {
+      document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+      document.getElementById(viewId).classList.add('active');
+      if (viewId === 'gameView') {
+        autoFocusInput();
+      }
+    }
+
+    function openPassportModal() {
+      const grid = document.getElementById('passportGrid');
+      grid.innerHTML = worldData.map(c => {
+        const prog = userProgress[c.id] || {};
+        const isPassed = prog.stage1 && prog.stage2 && prog.stage3;
+        
+        return `
+          <div class="stamp-slot" onclick="clickBadgeInPassport('${c.id}')">
+            <div class="badge-circle ${isPassed ? 'unlocked' : 'locked'}">
+              ${isPassed ? (c.badgeIcon || '🧋') : '🔒'}
+            </div>
+            <div style="font-size:11px; font-weight:bold; margin-top:6px; color:var(--navy);">${c.name}</div>
+            <div class="badge-click-hint">${isPassed ? '🔍 點擊看故事' : '未解鎖'}</div>
+          </div>
+        `;
+      }).join('');
+      document.getElementById('passportModal').style.display = 'flex';
+    }
+
+    function clickBadgeInPassport(countryId) {
+      const country = worldData.find(c => c.id === countryId);
+      if (!country) return;
+
+      const prog = userProgress[countryId] || {};
+      const isPassed = prog.stage1 && prog.stage2 && prog.stage3;
+
+      if (!isPassed) return alert(`🔒 【${country.name}】美食圖鑑尚未解鎖，請先前往地圖完成該國 3 關指法任務！`);
+
+      document.getElementById('detailCountryTitle').innerText = `${country.name} 美食榮譽勳章`;
+      document.getElementById('detailBadgeCircle').innerText = country.badgeIcon || '🧋';
+      document.getElementById('detailBadgeName').innerText = country.badgeTitle || `${country.name} 特色美食`;
+      document.getElementById('detailFoodIntro').innerText = country.foodIntro || country.badgeDesc || "無介紹資訊";
+
+      document.getElementById('badgeDetailModal').style.display = 'flex';
+    }
+
+    function closeBadgeDetailModal() { document.getElementById('badgeDetailModal').style.display = 'none'; }
+    function closePassportModal() { document.getElementById('passportModal').style.display = 'none'; }
+
+    function openBookModal() {
+      const grid = document.getElementById('badgesGrid');
+      grid.innerHTML = badgesData.map(b => `
+        <div class="badge-card ${b.unlocked ? '' : 'locked'}">
+          <div class="badge-icon">${b.icon}</div>
+          <div style="font-size:11px; font-weight:bold; color:var(--navy);">${b.name}</div>
+          <div style="font-size:9px; color:#666; margin-top:3px;">${b.desc}</div>
+        </div>
+      `).join('');
+      document.getElementById('bookModal').style.display = 'flex';
+    }
+    function closeBookModal() { document.getElementById('bookModal').style.display = 'none'; }
+
+    window.onload = () => {
+      initMap();
+      initCharacterSelection();
+    };
+    window.onresize = () => {
+      initMap();
+      focusContinent('world');
+    };
+  </script>
+</body>
+</html>
